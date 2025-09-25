@@ -22,14 +22,14 @@
         "pos_y": 815.0000000000001
     },
     "__last_session__": {
-        "text": "",
+        "text": "1111",
         "font_name": "Arial",
-        "font_size": 36,
+        "font_size": 361,
         "text_color": "255,255,255",
         "outline_color": "0,0,0",
         "alpha": 80.0,
         "style": "无",
-        "pos_x": 10,
-        "pos_y": 10
+        "pos_x": 19.6,
+        "pos_y": 1411.6000000000001
     }
 }
