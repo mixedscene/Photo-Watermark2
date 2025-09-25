@@ -1,0 +1,35 @@
+{
+    "默认模板 (右下角阴影)": {
+        "text": "© Your Name",
+        "font_name": "Arial",
+        "font_size": 24,
+        "text_color": "255,255,255",
+        "outline_color": "0,0,0",
+        "alpha": 80.0,
+        "style": "阴影",
+        "pos_x": -2,
+        "pos_y": -2
+    },
+    "lalala": {
+        "text": "lalala",
+        "font_name": "YuGothB",
+        "font_size": 199,
+        "text_color": "64,0,64",
+        "outline_color": "0,0,0",
+        "alpha": 80.0,
+        "style": "无",
+        "pos_x": 1852.8,
+        "pos_y": 815.0000000000001
+    },
+    "__last_session__": {
+        "text": "",
+        "font_name": "Arial",
+        "font_size": 36,
+        "text_color": "255,255,255",
+        "outline_color": "0,0,0",
+        "alpha": 80.0,
+        "style": "无",
+        "pos_x": 10,
+        "pos_y": 10
+    }
+}
