@@ -17,7 +17,7 @@ def get_exif_date(img_path):
     except Exception:
         return None
 
-def add_watermark(img_path, text, font_path, font_size, color, alpha, position, style, outline_color):
+def add_watermark(img_path, text, font_path, font_size, color, alpha, pos_x, pos_y, style, outline_color):
     img = Image.open(img_path).convert("RGBA")
     width, height = img.size
     
@@ -38,14 +38,23 @@ def add_watermark(img_path, text, font_path, font_size, color, alpha, position, 
     text_h = bbox[3] - bbox[1]
 
     # 位置计算
-    if position == "左上角":
-        pos = (10, 10)
-    elif position == "中间":
-        pos = ((width - text_w)//2, (height - text_h)//2)
-    elif position == "右下角":
-        pos = (width - text_w - 10, height - text_h - 10)
-    else:
-        pos = (10, 10)
+    # 这个逻辑根据传入的 pos_x 和 pos_y 参数来计算实际的 (x, y) 坐标
+    # pos_x 和 pos_y 是你的类变量 self.position_x 和 self.position_y
+    if pos_x == -1: # 居中
+        x = (width - text_w) // 2
+    elif pos_x == -2: # 靠右
+        x = width - text_w - 10
+    else: # 左对齐或手动拖拽的绝对坐标
+        x = pos_x
+    
+    if pos_y == -1: # 居中
+        y = (height - text_h) // 2
+    elif pos_y == -2: # 靠下
+        y = height - text_h - 10
+    else: # 靠上或手动拖拽的绝对坐标
+        y = pos_y
+        
+    pos = (x, y)
 
     # 阴影效果
     if style == "阴影":
@@ -78,7 +87,12 @@ class WatermarkApp:
         self.font_path = tk.StringVar()
         self.text_color = tk.StringVar(value="255,255,255")
         self.outline_color = tk.StringVar(value="0,0,0")
-        
+        self.current_preview_image = None
+        self.position_x = 10
+        self.position_y = 10
+        self.drag_start_x = 0
+        self.drag_start_y = 0
+
         self.create_widgets()
         
         # 使用 ttkdnd2 注册拖放功能
@@ -106,11 +120,22 @@ class WatermarkApp:
         # 图片文件名列表 (Listbox)
         self.file_listbox = tk.Listbox(self.list_preview_frame, height=10, width=50, selectmode=tk.SINGLE)
         self.file_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # 实时预览需要监听所有水印参数的变化
+        self.text_entry.bind("<KeyRelease>", self.update_preview)
+        self.font_combo.bind("<<ComboboxSelected>>", self.update_preview)
+        self.font_size_entry.bind("<KeyRelease>", self.update_preview)
+        self.position_combo.bind("<<ComboboxSelected>>", self.update_preview)
+        self.style_combo.bind("<<ComboboxSelected>>", self.update_preview)
+        self.alpha_scale.config(command=self.update_preview)
         self.file_listbox.bind("<<ListboxSelect>>", self.show_thumbnail)
         
         # 缩略图预览区域 (Label)
         self.preview_label = ttk.Label(self.list_preview_frame)
         self.preview_label.pack(side=tk.RIGHT, padx=10)
+
+        # 绑定鼠标事件以实现拖拽
+        self.preview_label.bind("<Button-1>", self.on_drag_start)
+        self.preview_label.bind("<B1-Motion>", self.on_drag)
 
         # ... (水印参数设置与之前相同) ...
         options_frame = ttk.Frame(self.root, padding="10")
@@ -178,15 +203,17 @@ class WatermarkApp:
 
     def choose_color(self):
         color_code = colorchooser.askcolor(title="选择文本颜色")
-        if color_code:
+        if color_code and color_code[0]:
             rgb = color_code[0]
             self.text_color.set(f"{int(rgb[0])},{int(rgb[1])},{int(rgb[2])}")
-            
+            self.update_preview() # 在这里调用更新
+
     def choose_outline_color(self):
         color_code = colorchooser.askcolor(title="选择描边颜色")
-        if color_code:
+        if color_code and color_code[0]:
             rgb = color_code[0]
             self.outline_color.set(f"{int(rgb[0])},{int(rgb[1])},{int(rgb[2])}")
+            self.update_preview() # 在这里调用更新
 
     def select_files(self):
         self.image_paths.clear()
@@ -272,13 +299,97 @@ class WatermarkApp:
 
     def show_thumbnail(self, event):
         selected_index = self.file_listbox.curselection()
+
         if selected_index:
+            # 如果有选中的图片，就获取索引并更新预览
             index = selected_index[0]
-            thumbnail = self.thumbnails[index]
-            if thumbnail:
-                self.preview_label.config(image=thumbnail)
+            self.update_preview()
+        else:
+            # 如果没有选中的图片，清空预览区域
+            self.preview_label.config(image="")
+            self.current_preview_image = None
+    
+    def update_preview(self, event=None):
+        selected_index = self.file_listbox.curselection()
+        if not selected_index:
+            return
+
+        index = selected_index[0]
+        original_image_path = self.image_paths[index]
+        
+        try:
+            watermark_text = self.text_entry.get()
+            font_path = self.get_font_path(self.font_combo.get())
+            font_size = int(self.font_size_entry.get())
+            text_color = tuple(map(int, self.text_color.get().split(',')))
+            alpha = self.alpha_scale.get()
+            position = self.position_combo.get()
+            style = self.style_combo.get()
+            outline_color = tuple(map(int, self.outline_color.get().split(',')))
+            
+            # 检查是否使用拍摄日期
+            if watermark_text == "使用拍摄日期":
+                date = get_exif_date(original_image_path)
+                final_text = date if date else ""
             else:
-                self.preview_label.config(image="")
+                final_text = watermark_text
+
+            if not final_text:
+                self.preview_label.config(image=self.thumbnails[index])
+                return
+
+            # 使用 add_watermark 函数创建带水印的图片
+            watermarked_image = add_watermark(
+                original_image_path, 
+                final_text, 
+                font_path, 
+                font_size, 
+                text_color, 
+                alpha, 
+                position, 
+                style, 
+                outline_color
+            )
+            
+            # 将图片尺寸调整为预览大小
+            watermarked_image.thumbnail((400, 400))
+            
+            # 转换为 Tkinter 兼容的格式并更新预览
+            self.current_preview_image = ImageTk.PhotoImage(watermarked_image)
+            self.preview_label.config(image=self.current_preview_image)
+
+        except (ValueError, FileNotFoundError) as e:
+            # 如果参数无效或文件找不到，显示原始缩略图并提示错误
+            # print(f"预览更新失败: {e}") 
+            self.preview_label.config(image=self.thumbnails[index])
+            
+    def show_thumbnail(self, event):
+        selected_index = self.file_listbox.curselection()
+        if not selected_index:
+            return
+        
+        index = selected_index[0]
+        # 第一次选择图片时，直接更新预览
+        self.update_preview()
+    
+    def on_drag_start(self, event):
+        self.drag_start_x = event.x
+        self.drag_start_y = event.y
+
+    def on_drag(self, event):
+        dx = event.x - self.drag_start_x
+        dy = event.y - self.drag_start_y
+        
+        # 调整水印位置
+        self.position_x += dx
+        self.position_y += dy
+        
+        # 更新拖拽起点
+        self.drag_start_x = event.x
+        self.drag_start_y = event.y
+        
+        # 触发预览更新
+        self.update_preview()
 
     def apply_watermarks(self):
         if not self.image_paths:
