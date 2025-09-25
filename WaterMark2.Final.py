@@ -18,17 +18,34 @@ def get_exif_date(img_path):
         return None
 
 def add_watermark(img_path, text, font_path, font_size, color, alpha, pos_x, pos_y, style, outline_color):
-    img = Image.open(img_path).convert("RGBA")
+    """
+    为图片添加水印的核心函数。
+    - 修复了文件句柄未释放导致多次保存失败的Bug。
+    """
+    exif_data = None
+    is_jpg = img_path.lower().endswith((".jpg", ".jpeg"))
+    is_png = img_path.lower().endswith(".png")
+    # 仅对jpeg/jpg文件尝试加载EXIF信息
+    if is_jpg:
+        try:
+            exif_data = piexif.load(img_path)
+        except Exception as e:
+            print(f"警告：无法加载 {os.path.basename(img_path)} 的EXIF信息: {e}")
+
+    # --- 核心修复：使用 with 语句确保文件句柄被正确关闭 ---
+    with Image.open(img_path) as img_file:
+        img = img_file.convert("RGBA")
+
     width, height = img.size
-    
+
     try:
         font = ImageFont.truetype(font_path, font_size)
     except IOError:
         font = ImageFont.load_default()
 
-    txt_layer = Image.new("RGBA", img.size, (255,255,255,0))
+    txt_layer = Image.new("RGBA", img.size, (255, 255, 255, 0))
     draw = ImageDraw.Draw(txt_layer)
-    
+
     fill_color = color + (int(alpha * 255 / 100),)
 
     bbox = draw.textbbox((0, 0), text, font=font)
@@ -41,20 +58,20 @@ def add_watermark(img_path, text, font_path, font_size, color, alpha, pos_x, pos
         x = width - text_w - 10
     else: # 左对齐或手动拖拽的绝对坐标
         x = pos_x
-    
+
     if pos_y == -1: # 居中
         y = (height - text_h) // 2
     elif pos_y == -2: # 靠下
         y = height - text_h - 10
     else: # 靠上或手动拖拽的绝对坐标
         y = pos_y
-        
+
     pos = (x, y)
 
     if style == "阴影":
         shadow_pos = (pos[0] + 2, pos[1] + 2)
-        draw.text(shadow_pos, text, font=font, fill=(0,0,0,128))
-    
+        draw.text(shadow_pos, text, font=font, fill=(0, 0, 0, 128))
+
     elif style == "描边":
         outline_fill = outline_color + (int(alpha * 255 / 100),)
         for x_offset in [-1, 0, 1]:
@@ -63,10 +80,25 @@ def add_watermark(img_path, text, font_path, font_size, color, alpha, pos_x, pos
                     continue
                 outline_pos = (pos[0] + x_offset, pos[1] + y_offset)
                 draw.text(outline_pos, text, font=font, fill=outline_fill)
-                
+
     draw.text(pos, text, font=font, fill=fill_color)
-    watermarked = Image.alpha_composite(img, txt_layer)
-    return watermarked.convert("RGB")
+    watermarked_img = Image.alpha_composite(img, txt_layer)
+
+    # PNG 保留透明通道，JPG转为RGB
+    if is_png:
+        final_img = watermarked_img  # 保持RGBA
+        final_exif_bytes = None      # PNG不支持EXIF
+    else:
+        final_img = watermarked_img.convert("RGB")
+        final_exif_bytes = b''
+        if exif_data:
+            try:
+                final_exif_bytes = piexif.dump(exif_data)
+            except Exception as e:
+                print(f"警告：无法打包 {os.path.basename(img_path)} 的EXIF信息: {e}")
+
+    # 返回处理后的图片和EXIF数据
+    return final_img, final_exif_bytes
 
 import json
 from tkinter import simpledialog
@@ -313,22 +345,59 @@ class WatermarkApp:
             self.active_index = selected_indices[0]; path = self.image_paths[self.active_index]
             self.load_settings_for_image(path); self.update_preview()
     def update_preview(self, event=None):
-        if self.active_index is None: self.preview_label.config(image=""); self.current_preview_image = None; return
+        if self.active_index is None:
+            self.preview_label.config(image="")
+            self.current_preview_image = None
+            return
+
         self.save_current_settings()
+
         original_image_path = self.image_paths[self.active_index]
         settings = self.image_settings.get(original_image_path)
         if not settings: return
+
         try:
-            font_path = self.get_font_path(settings["font_name"]); text_color = tuple(map(int, settings["text_color"].split(','))); outline_color = tuple(map(int, settings["outline_color"].split(',')))
+            font_path = self.get_font_path(settings["font_name"])
+            text_color = tuple(map(int, settings["text_color"].split(',')))
+            outline_color = tuple(map(int, settings["outline_color"].split(',')))
+            
+            # 如果没有水印文字，直接显示原始缩略图
             if not settings["text"]:
                 thumb = self.thumbnails[self.active_index]
-                if thumb: self.current_preview_image = ImageTk.PhotoImage(thumb); self.preview_label.config(image=self.current_preview_image)
+                if thumb:
+                    self.current_preview_image = ImageTk.PhotoImage(thumb)
+                    self.preview_label.config(image=self.current_preview_image)
                 return
-            watermarked_image = add_watermark(original_image_path, settings["text"], font_path, settings["font_size"], text_color, settings["alpha"], settings["pos_x"], settings["pos_y"], settings["style"], outline_color)
-            watermarked_image.thumbnail((400, 400)); self.current_preview_image = ImageTk.PhotoImage(watermarked_image); self.preview_label.config(image=self.current_preview_image)
-        except Exception:
+
+            # --- 核心修复：正确处理 add_watermark 返回的两个值 ---
+            # 我们只需要第一个返回值（图片对象），用 _ 来忽略第二个返回值（EXIF数据）
+            watermarked_image, _ = add_watermark(
+                original_image_path, 
+                settings["text"], 
+                font_path, 
+                settings["font_size"], 
+                text_color, 
+                settings["alpha"], 
+                settings["pos_x"],
+                settings["pos_y"], 
+                settings["style"], 
+                outline_color
+            )
+            # --- 修复结束 ---
+            
+            watermarked_image.thumbnail((400, 400))
+            self.current_preview_image = ImageTk.PhotoImage(watermarked_image)
+            self.preview_label.config(image=self.current_preview_image)
+
+        except Exception as e:
+            # 打印错误有助于调试
+            print(f"预览更新失败: {e}")
+            # Fallback: 显示原始缩略图
             thumb = self.thumbnails[self.active_index]
-            if thumb: self.current_preview_image = ImageTk.PhotoImage(thumb); self.preview_label.config(image=self.current_preview_image)
+            if thumb:
+                self.current_preview_image = ImageTk.PhotoImage(thumb)
+                self.preview_label.config(image=self.current_preview_image)
+
     def use_exif_date(self):
         if self.active_index is None: messagebox.showwarning("警告", "请先在列表中选择一张图片。"); return
         fpath = self.image_paths[self.active_index]
@@ -435,12 +504,35 @@ class WatermarkApp:
                 if final_text == "使用拍摄日期": date = get_exif_date(fpath); final_text = date if date else ""
                 if not final_text: print(f"{fname} 水印文本为空，跳过"); continue
                 font_path = self.get_font_path(settings["font_name"]); text_color = tuple(map(int, settings["text_color"].split(','))); outline_color = tuple(map(int, settings["outline_color"].split(',')))
-                watermarked = add_watermark(fpath, final_text, font_path, settings["font_size"], text_color, settings["alpha"], settings["pos_x"], settings["pos_y"], settings["style"], outline_color)
+                # add_watermark 现在返回图片和EXIF
+                watermarked_img, exif_bytes = add_watermark(fpath, final_text, font_path, settings["font_size"], 
+                    text_color, settings["alpha"], settings["pos_x"], 
+                    settings["pos_y"], settings["style"], outline_color
+                )
+                
                 base_name, _ = os.path.splitext(fname)
-                if naming_rule == "添加前缀": new_fname = f"{custom_text}{base_name}.{output_format}"
-                elif naming_rule == "添加后缀": new_fname = f"{base_name}{custom_text}.{output_format}"
-                else: new_fname = f"{base_name}.{output_format}"
-                out_path = os.path.join(output_dir, new_fname); watermarked.save(out_path, format=output_format); print(f"已保存: {out_path}")
+                if naming_rule == "添加前缀":
+                    new_fname = f"{custom_text}{base_name}.{output_format}"
+                elif naming_rule == "添加后缀":
+                    new_fname = f"{base_name}{custom_text}.{output_format}"
+                else:
+                    new_fname = f"{base_name}.{output_format}"
+                
+                out_path = os.path.join(output_dir, new_fname)
+
+                # --- 核心修复：根据格式和EXIF数据进行保存 ---
+                if output_format.lower() in ['jpg', 'jpeg']:
+                    if exif_bytes:
+                        watermarked_img.save(out_path, format='jpeg', exif=exif_bytes)
+                    else:
+                        watermarked_img.save(out_path, format='jpeg')
+                elif output_format.lower() == 'png':
+                    # PNG 保持RGBA，不能带exif
+                    watermarked_img.save(out_path, format='png')
+                else:
+                    watermarked_img.save(out_path, format=output_format)
+
+                print(f"已保存: {out_path}")
             except Exception as e: print(f"{fname} 处理失败: {e}")
         messagebox.showinfo("完成", f"所有图片处理完毕！\n文件已保存至：{output_dir}")
 
