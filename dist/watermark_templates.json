@@ -9,27 +9,5 @@
         "style": "阴影",
         "pos_x": -2,
         "pos_y": -2
-    },
-    "mask": {
-        "text": "mask",
-        "font_name": "ROGFontsv1",
-        "font_size": 362,
-        "text_color": "0,0,160",
-        "outline_color": "0,0,0",
-        "alpha": 80.0,
-        "style": "描边",
-        "pos_x": 787.2000000000003,
-        "pos_y": 547.2
-    },
-    "__last_session__": {
-        "text": "111111",
-        "font_name": "Arial",
-        "font_size": 361,
-        "text_color": "255,255,255",
-        "outline_color": "0,0,0",
-        "alpha": 80.0,
-        "style": "无",
-        "pos_x": 1440.4,
-        "pos_y": 854.8
     }
 }
